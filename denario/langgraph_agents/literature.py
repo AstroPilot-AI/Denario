@@ -101,6 +101,8 @@ def semantic_scholar(state: GraphState, config: RunnableConfig):
             paper_str = f"""{papers_analyzed+state['literature']['num_papers']}. {title} ({year})\nAuthors: {authors}\nAbstract: {abstract}\nURL: {url}"""
 
             # extract arXiv link, if any
+            arXiv_pdf = None
+            arXiv_pdf2 = None
             if externalID:
                 arXiv = externalID.get("ArXiv", None)
                 if arXiv:
@@ -111,7 +113,7 @@ def semantic_scholar(state: GraphState, config: RunnableConfig):
             # extract pdf link, if any
             if pdf:
                 pdf = pdf.get('url', None)
-                if pdf and pdf!=arXiv_pdf and pdf!=arXiv_pdf2:
+                if pdf and (arXiv_pdf is None or (pdf!=arXiv_pdf and pdf!=arXiv_pdf2)):
                     paper_str = f"{paper_str}\npdf: {pdf}"
             
             # put these papers in the literature.log
