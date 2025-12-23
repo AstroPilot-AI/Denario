@@ -105,30 +105,16 @@ claude45sonnet = LLM(name="claude-sonnet-4-5",
                      temperature=0)
 """`claude-4.5-Sonnet` model."""
 
-claude45sonnet_20250929 = LLM(name="claude-sonnet-4-5-20250929",
-                              max_output_tokens=64000,
-                              temperature=0)
-"""`claude-4.5-Sonnet` snapshot model."""
-
 claude45haiku = LLM(name="claude-haiku-4-5",
                     max_output_tokens=64000,
                     temperature=0)
 """`claude-4.5-Haiku` model."""
-
-claude45haiku_20251001 = LLM(name="claude-haiku-4-5-20251001",
-                             max_output_tokens=64000,
-                             temperature=0)
-"""`claude-4.5-Haiku` snapshot model."""
 
 claude45opus = LLM(name="claude-opus-4-5",
                    max_output_tokens=64000,
                    temperature=0)
 """`claude-4.5-Opus` model."""
 
-claude45opus_20251101 = LLM(name="claude-opus-4-5-20251101",
-                            max_output_tokens=64000,
-                            temperature=0)
-"""`claude-4.5-Opus` snapshot model."""
 
 models : Dict[str, LLM] = {
                             "gemini-2.0-flash" : gemini20flash,
@@ -152,10 +138,7 @@ models : Dict[str, LLM] = {
                             "claude-4-opus" : claude4opus,
                             "claude-4.1-opus" : claude41opus,
                             "claude-4.5-sonnet" : claude45sonnet,
-                            "claude-4.5-sonnet-20250929" : claude45sonnet_20250929,
                             "claude-4.5-haiku" : claude45haiku,
-                            "claude-4.5-haiku-20251001" : claude45haiku_20251001,
                             "claude-4.5-opus" : claude45opus,
-                            "claude-4.5-opus-20251101" : claude45opus_20251101,
                            }
 """Dictionary with the available models."""
