@@ -7,18 +7,22 @@ from ..key_manager import KeyManager
 def _execute_query(payload, keys: KeyManager):
     """
     Executes a query by sending a POST request to the Perplexity API.
-
-    Args:
-        payload (dict[str, Any]): The payload to send in the API request.
-
-    Returns:
-        PerplexityChatCompletionResponse: Parsed response from the Perplexity API.
     """
     api_key = keys.PERPLEXITY
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=payload).json()
+    if not api_key:
+        print("\n[WARNING] PERPLEXITY_API_KEY not found. Skipping citations.")
+        return None
 
-    return response
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    try:
+        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=payload, timeout=60)
+        if response.status_code != 200:
+            print(f"\n[WARNING] Perplexity API returned status code {response.status_code}")
+            return None
+        return response.json()
+    except Exception as e:
+        print(f"\n[WARNING] Error calling Perplexity API: {e}")
+        return None
 
 
 def perplexity(para, keys: KeyManager):
@@ -61,21 +65,12 @@ Your answear should not have the formating marks <TEXT> and </TEXT>, just the te
     "search_domain_filter": ["arxiv.org"],
     }
     perplexity_response = _execute_query(payload, keys)
-    content = perplexity_response["choices"][0]["message"]["content"]
-    citations = perplexity_response["citations"]
-    cleaned_response = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL)
+    if perplexity_response is None or "choices" not in perplexity_response:
+        return (para, []) # Return original text and no citations on failure
 
-    def citation_repl(match):
-        # Extract the citation number as a string and convert to an integer.
-        number_str = match.group(1)
-        index = int(number_str) - 1  # Adjust for 0-based indexing
-        if 0 <= index < len(citations):
-            return f'[[{number_str}]({citations[index]})]'
-        # If the citation number is out of bounds, return it unchanged.
-        return match.group(0)
-    # Replace all instances of citations in the form [x] using the helper function.
-    # markdown_response = re.sub(r'\[(\d+)\]', citation_repl, cleaned_response)
-    #display(Markdown(markdown_response))
+    content = perplexity_response["choices"][0]["message"]["content"]
+    citations = perplexity_response.get("citations", [])
+    cleaned_response = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL)
     return (cleaned_response, citations)
 
 

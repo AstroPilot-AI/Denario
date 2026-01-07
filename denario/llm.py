@@ -30,6 +30,18 @@ gemini25pro = LLM(name="gemini-2.5-pro",
                   openrouter_name="google/gemini-2.0-pro-exp-02-05:free")
 """`gemini-2.5-pro` model."""
 
+gemini3pro_preview = LLM(name="gemini-3-pro-preview",
+                    max_output_tokens=65536,
+                    temperature=0.7,
+                    openrouter_name="google/gemini-3-pro-preview")
+"""`gemini-3-pro-preview` model."""
+
+gemini3flash_preview = LLM(name="gemini-3-flash-preview",
+                    max_output_tokens=65536,
+                    temperature=0.7,
+                    openrouter_name="google/gemini-3-flash-preview")
+"""`gemini-3-flash-preview` model."""
+
 o3mini = LLM(name="o3-mini-2025-01-31",
              max_output_tokens=100000,
              temperature=None,
@@ -100,6 +112,8 @@ models : Dict[str, LLM] = {
                             "gemini-2.0-flash" : gemini20flash,
                             "gemini-2.5-flash" : gemini25flash,
                             "gemini-2.5-pro" : gemini25pro,
+                            "gemini-3-pro-preview" : gemini3pro_preview,
+                            "gemini-3-flash-preview" : gemini3flash_preview,
                             "o3-mini" : o3mini,
                             "gpt-4o" : gpt4o,
                             "gpt-4.1" : gpt41,
