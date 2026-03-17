@@ -84,6 +84,14 @@ Generate a research idea from that data specification.
 den.get_idea()
 ```
 
+Optionally, give Denario a short researcher statement so the paper-writing stages preserve your framing and priorities rather than defaulting only to generic scientific tone.
+
+```python
+den.set_researcher_statement(
+    "Emphasize robustness and measurement limits. Do not overclaim causality."
+)
+```
+
 Generate the methodology required for working on that idea.
 
 ```python
@@ -117,6 +125,8 @@ You can also manually provide any info as a string or markdown file in an interm
 ```python
 den.set_method(path_to_the_method_file.md)
 ```
+
+You can also provide a `researcher_statement.md` artifact through `set_researcher_statement(...)` if you want the paper-writing stages to preserve a particular stance, emphasis, or constraint.
 
 ## DenarioApp
 

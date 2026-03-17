@@ -1,6 +1,19 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
 
+def researcher_statement_context(state):
+    statement = state['idea'].get('ResearcherStatement')
+    if not statement:
+        return ""
+
+    return rf"""
+Researcher statement:
+{statement}
+
+Use this statement to preserve the researcher's framing, emphasis, caveats, and perspective. Follow it when it is compatible with the actual methods and results, and do not invent support that is not present in the artifacts.
+"""
+
+
 def idea_prompt(topic):
     return [
         SystemMessage(content='''You are a scientist and your role is to generate a groundbreaking idea for a PhD student thesis.'''),
@@ -83,6 +96,8 @@ Methods:
 Results:
 {state['idea']['Results']}
 
+{researcher_statement_context(state)}
+
 **Respond in exactly this format**
 
 ```json
@@ -105,6 +120,8 @@ Methods:
 
 Results:
 {state['idea']['Results']}
+
+{researcher_statement_context(state)}
 
 Previous abstract:
 {state['paper']['Abstract']}
@@ -141,6 +158,8 @@ Paper general idea:
 
 Paper methods:
 {state['idea']['Methods']}
+
+{researcher_statement_context(state)}
 
 Please respond in this format:
 
@@ -179,6 +198,8 @@ Paper idea:
 
 Paper methods:
 {state['idea']['Methods']}
+
+{researcher_statement_context(state)}
 
 Previous paper introduction: 
 {state['paper']['Introduction']}
@@ -220,6 +241,8 @@ Paper introduction:
 Short description of paper methods:
 {state['idea']['Methods']}
 
+{researcher_statement_context(state)}
+
 Respond in this format:
 
 \begin{{Methods}}
@@ -259,6 +282,8 @@ Paper methods:
 
 Paper short results: 
 {state['idea']['Results']}
+
+{researcher_statement_context(state)}
 
 Respond in this format:
 
@@ -332,6 +357,8 @@ Paper methods:
 
 Results: 
 {state['paper']['Results']}
+
+{researcher_statement_context(state)}
 
 Follow these guidelines:
 - Write in LaTex
@@ -597,6 +624,8 @@ Idea:
 
 Methods:
 {state['idea']['Methods']}
+
+{researcher_statement_context(state)}
     """
 
 def keyword_prompt(state):
@@ -629,6 +658,8 @@ Idea:
 
 Methods:
 {state['idea']['Methods']}
+
+{researcher_statement_context(state)}
 
 
 AAS keywords list:

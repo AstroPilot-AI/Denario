@@ -10,7 +10,7 @@ from langchain_anthropic import ChatAnthropic
 
 from .parameters import GraphState
 from .latex_presets import journal_dict
-from ..config import INPUT_FILES, IDEA_FILE, METHOD_FILE, RESULTS_FILE, PAPER_FOLDER, PLOTS_FOLDER, LaTeX_DIR
+from ..config import INPUT_FILES, RESEARCHER_STATEMENT_FILE, IDEA_FILE, METHOD_FILE, RESULTS_FILE, PAPER_FOLDER, PLOTS_FOLDER, LaTeX_DIR
 
 
 def preprocess_node(state: GraphState, config: RunnableConfig):
@@ -50,6 +50,7 @@ def preprocess_node(state: GraphState, config: RunnableConfig):
 
     # set the name of the other files
     state['files'] = {**state['files'],
+                      "ResearcherStatement": f"{RESEARCHER_STATEMENT_FILE}",
                       "Idea":      f"{IDEA_FILE}",    #name of file containing idea description
                       "Methods":   f"{METHOD_FILE}",  #name of file with methods description
                       "Results":   f"{RESULTS_FILE}", #name of file with results description
@@ -70,7 +71,7 @@ def preprocess_node(state: GraphState, config: RunnableConfig):
     
     # read input files
     idea = {}
-    for key in ["Idea", "Methods", "Results"]:
+    for key in ["ResearcherStatement", "Idea", "Methods", "Results"]:
         path = Path(f"{state['files']['Folder']}/{INPUT_FILES}/{state['files'][key]}")
         if path.exists():
             with path.open("r", encoding="utf-8") as f:
@@ -160,4 +161,3 @@ def preprocess_node(state: GraphState, config: RunnableConfig):
             "paper": {**state['paper'], "summary": ""},
             "time": state['time'],
     }
-

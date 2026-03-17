@@ -24,6 +24,7 @@ class PAPER(TypedDict):
 # Class for Input/Output files
 class FILES(TypedDict):
     Folder: str       #name of the project file
+    ResearcherStatement: str #name of the file containing the user's research framing
     Idea: str         #name of the file containing the project idea
     Methods: str      #name of the file containing the methods 
     Results: str      #name of the file containing the results
@@ -43,6 +44,7 @@ class FILES(TypedDict):
 
 # Idea class
 class IDEA(TypedDict):
+    ResearcherStatement: str | None
     Idea: str
     Methods: str
     Results: str

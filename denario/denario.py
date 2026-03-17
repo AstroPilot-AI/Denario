@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image 
 import cmbagent
 
-from .config import DEFAUL_PROJECT_NAME, INPUT_FILES, PLOTS_FOLDER, DESCRIPTION_FILE, IDEA_FILE, METHOD_FILE, RESULTS_FILE, LITERATURE_FILE, AUTHORSHIP_CONFIRMATION_FILE
+from .config import DEFAUL_PROJECT_NAME, INPUT_FILES, PLOTS_FOLDER, DESCRIPTION_FILE, RESEARCHER_STATEMENT_FILE, IDEA_FILE, METHOD_FILE, RESULTS_FILE, LITERATURE_FILE, AUTHORSHIP_CONFIRMATION_FILE
 from .research import Research
 from .key_manager import KeyManager
 from .llm import LLM, models
@@ -203,6 +203,13 @@ class Denario:
 
         check_file_paths(self.research.data_description)
 
+    def set_researcher_statement(self, researcher_statement: str | None = None) -> None:
+        """Set the user's framing, stance, or non-negotiable perspective for paper writing."""
+
+        self.research.researcher_statement = self.setter(
+            researcher_statement, RESEARCHER_STATEMENT_FILE
+        )
+
     def set_idea(self, idea: str | None = None) -> None:
         """Manually set an idea, either directly from a string or providing the path of a markdown file with the idea."""
 
@@ -245,6 +252,7 @@ class Denario:
 
         for setter in (
             self.set_data_description,
+            self.set_researcher_statement,
             self.set_idea,
             self.set_method,
             self.set_results,
@@ -275,8 +283,13 @@ class Denario:
 
     def show_idea(self) -> None:
         """Show the provided or generated idea by the `set_idea` or `get_idea` methods."""
-
+        
         self.printer(self.research.idea)
+
+    def show_researcher_statement(self) -> None:
+        """Show the provided researcher statement."""
+
+        self.printer(self.research.researcher_statement)
 
     def show_method(self) -> None:
         """Show the provided or generated methods by `set_method` or `get_method`."""

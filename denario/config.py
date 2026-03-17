@@ -18,6 +18,7 @@ PLOTS_FOLDER = "plots"
 PAPER_FOLDER = "paper"
 
 DESCRIPTION_FILE = "data_description.md"
+RESEARCHER_STATEMENT_FILE = "researcher_statement.md"
 IDEA_FILE = "idea.md"
 METHOD_FILE = "methods.md"
 RESULTS_FILE = "results.md"

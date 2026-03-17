@@ -5,6 +5,11 @@ class Research(BaseModel):
     """Research class."""
     data_description: str = Field(default="", description="The data description of the project")
     """The data description of the project."""
+    researcher_statement: str = Field(
+        default="",
+        description="The user's framing, stance, and perspective for the paper-writing stages.",
+    )
+    """The user's framing, stance, and perspective for the paper-writing stages."""
     idea: str = Field(default="", description="The idea of the project")
     """The idea of the project."""
     methodology: str = Field(default="", description="The methodology of the project")
