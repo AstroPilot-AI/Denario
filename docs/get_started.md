@@ -46,6 +46,14 @@ With the methodology setup, perform the required computations and get the plots 
 den.get_results()
 ```
 
+Before paper generation, explicitly confirm that a human reviewed the outputs and accepts authorship responsibility.
+
+```python
+den.confirm_authorship(
+    "I checked the claims against the results, reviewed the citations, and rewrote the sections I will stand behind."
+)
+```
+
 Finally, generate a latex article with the results. You can specify the journal style, in this example we choose the [APS (Physical Review Journals)](https://journals.aps.org/) style.
 
 ```python

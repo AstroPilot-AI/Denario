@@ -3,11 +3,12 @@ import asyncio
 import time
 import os
 import shutil
+from datetime import datetime, UTC
 from pathlib import Path
 from PIL import Image 
 import cmbagent
 
-from .config import DEFAUL_PROJECT_NAME, INPUT_FILES, PLOTS_FOLDER, DESCRIPTION_FILE, IDEA_FILE, METHOD_FILE, RESULTS_FILE, LITERATURE_FILE
+from .config import DEFAUL_PROJECT_NAME, INPUT_FILES, PLOTS_FOLDER, DESCRIPTION_FILE, IDEA_FILE, METHOD_FILE, RESULTS_FILE, LITERATURE_FILE, AUTHORSHIP_CONFIRMATION_FILE
 from .research import Research
 from .key_manager import KeyManager
 from .llm import LLM, models
@@ -18,6 +19,7 @@ from .experiment import Experiment
 from .paper_agents.agents_graph import build_graph
 from .utils import llm_parser, input_check, check_file_paths, in_notebook
 from .langgraph_agents.agents_graph import build_lg_graph
+from .exceptions import AuthorshipConfirmationError
 from cmbagent import preprocess_task
 
 class Denario:
@@ -57,6 +59,9 @@ class Denario:
         self.project_dir = project_dir
 
         self.plots_folder = os.path.join(self.project_dir, INPUT_FILES, PLOTS_FOLDER)
+        self.authorship_confirmation_path = os.path.join(
+            self.project_dir, INPUT_FILES, AUTHORSHIP_CONFIRMATION_FILE
+        )
         # Ensure the folder exists
         os.makedirs(self.plots_folder, exist_ok=True)
 
@@ -92,19 +97,99 @@ class Denario:
     def setter(self, field: str | None, file: str) -> str:
         """Base method for setting the content of idea, method or results."""
 
+        path = os.path.join(self.project_dir, INPUT_FILES, file)
+        previous_value = None
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                previous_value = f.read()
+
         if field is None:
             try:
-                with open(os.path.join(self.project_dir, INPUT_FILES, file), 'r') as f:
+                with open(path, 'r') as f:
                     field = f.read()
             except FileNotFoundError:
                 raise FileNotFoundError("Please provide an input string or path to a markdown file.")
 
         field = input_check(field)
                 
-        with open(os.path.join(self.project_dir, INPUT_FILES, file), 'w') as f:
+        with open(path, 'w') as f:
             f.write(field)
 
+        if previous_value is not None and previous_value != field:
+            self._invalidate_authorship_confirmation()
+
         return field
+
+    def _invalidate_authorship_confirmation(self) -> None:
+        self.research.authorship_confirmation = ""
+        if os.path.exists(self.authorship_confirmation_path):
+            os.remove(self.authorship_confirmation_path)
+
+    def _load_authorship_confirmation(self) -> str:
+        if self.research.authorship_confirmation:
+            return self.research.authorship_confirmation
+
+        try:
+            with open(self.authorship_confirmation_path, 'r') as f:
+                self.research.authorship_confirmation = f.read()
+        except FileNotFoundError:
+            self.research.authorship_confirmation = ""
+
+        return self.research.authorship_confirmation
+
+    def confirm_authorship(
+        self,
+        summary: str,
+        *,
+        reviewed_claims: bool = True,
+        reviewed_citations: bool = True,
+        accepts_responsibility: bool = True,
+    ) -> str:
+        """Record explicit human sign-off before paper generation.
+
+        Args:
+            summary: Brief description of what the human reviewed or rewrote.
+            reviewed_claims: Confirm that claims were checked against the artifacts.
+            reviewed_citations: Confirm that citations/references were checked.
+            accepts_responsibility: Confirm that a human accepts authorship responsibility.
+        """
+
+        summary = input_check(summary).strip()
+        if not summary:
+            raise ValueError("Please provide a non-empty authorship review summary.")
+        if not reviewed_claims or not reviewed_citations or not accepts_responsibility:
+            raise ValueError(
+                "Authorship confirmation requires claims review, citation review, and responsibility acceptance."
+            )
+
+        confirmed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+        confirmation = (
+            "# Authorship Confirmation\n\n"
+            f"Confirmed at: {confirmed_at}\n\n"
+            "- Reviewed claims: yes\n"
+            "- Reviewed citations: yes\n"
+            "- Accepts human authorship responsibility: yes\n\n"
+            "## Review Summary\n\n"
+            f"{summary}\n"
+        )
+
+        with open(self.authorship_confirmation_path, 'w') as f:
+            f.write(confirmation)
+
+        self.research.authorship_confirmation = confirmation
+        print(f"Authorship confirmation written to: {self.authorship_confirmation_path}")
+        return confirmation
+
+    def _require_authorship_confirmation(self) -> str:
+        confirmation = self._load_authorship_confirmation()
+        if confirmation.strip():
+            return confirmation
+
+        raise AuthorshipConfirmationError(
+            "Paper generation requires explicit human sign-off. "
+            "Review the generated artifacts, then call "
+            "confirm_authorship(summary=...) before get_paper()."
+        )
 
     def set_data_description(self, data_description: str | None = None) -> None:
         """
@@ -136,6 +221,8 @@ class Denario:
     def set_plots(self, plots: list[str] | list[Image.Image] | None = None) -> None:
         """Manually set the plots from their path."""
 
+        provided_plots = plots is not None
+
         if plots is None:
             plots = [str(p) for p in (Path(self.project_dir) / "input_files" / "Plots").glob("*.png")]
 
@@ -149,6 +236,9 @@ class Denario:
                 plot_name = f"plot_{i}.png"
             
             img.save( os.path.join(self.project_dir, INPUT_FILES, PLOTS_FOLDER, plot_name) )
+
+        if provided_plots:
+            self._invalidate_authorship_confirmation()
 
     def set_all(self) -> None:
         """Set all Research fields if present in the working directory"""
@@ -260,6 +350,7 @@ class Denario:
                 print(f"Enhanced text from file length: {len(enhanced_text)}")
         
         # Update the research object with enhanced text
+        previous_data_description = self.research.data_description
         self.research.data_description = enhanced_text
 
         # Create the input_files directory if it doesn't exist
@@ -273,6 +364,9 @@ class Denario:
 
         # set the enhanced text to the research object
         self.research.data_description = enhanced_text
+
+        if previous_data_description != enhanced_text:
+            self._invalidate_authorship_confirmation()
             
         print(f"Enhanced text written to: {os.path.join(input_files_dir, DESCRIPTION_FILE)}")
 
@@ -361,6 +455,7 @@ class Denario:
             f.write(idea)
 
         self.idea = idea
+        self._invalidate_authorship_confirmation()
 
     def get_idea_fast(self,
                       llm: LLM | str = models["gemini-2.0-flash"],
@@ -410,6 +505,7 @@ class Denario:
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
         print(f"Idea generated in {minutes} min {seconds} sec.")
+        self._invalidate_authorship_confirmation()
 
     def check_idea(self,
                    mode : str = 'semantic_scholar',
@@ -634,6 +730,7 @@ class Denario:
         method_path = os.path.join(self.project_dir, INPUT_FILES, METHOD_FILE)
         with open(method_path, 'w') as f:
             f.write(methododology)
+        self._invalidate_authorship_confirmation()
 
     def get_method_fast(self,
                         llm: LLM | str = models["gemini-2.0-flash"],
@@ -684,6 +781,7 @@ class Denario:
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
         print(f"Methods generated in {minutes} min {seconds} sec.")  
+        self._invalidate_authorship_confirmation()
 
     def get_results(self,
                     involved_agents: List[str] = ['engineer', 'researcher'],
@@ -779,6 +877,7 @@ class Denario:
         results_path = os.path.join(self.project_dir, INPUT_FILES, RESULTS_FILE)
         with open(results_path, 'w') as f:
             f.write(self.research.results)
+        self._invalidate_authorship_confirmation()
     
     def get_keywords(self, input_text: str, n_keywords: int = 5, kw_type: str = 'unesco') -> None:
         """
@@ -803,6 +902,7 @@ class Denario:
                   writer: str = 'scientist',
                   cmbagent_keywords: bool = False,
                   add_citations=True,
+                  require_authorship_confirmation: bool = True,
                   ) -> None:
         """
         Generate a full paper based on the files in input_files:
@@ -828,7 +928,11 @@ class Denario:
             writer: set the style and tone to write. E.g. astrophysicist, biologist, chemist
             cmbagent_keywords: whether to use CMBAgent to select the keywords
             add_citations: whether to add citations to the paper or not
+            require_authorship_confirmation: require explicit human review before paper writing
         """
+
+        if require_authorship_confirmation:
+            self._require_authorship_confirmation()
         
         # Start timer
         start_time = time.time()
@@ -929,4 +1033,11 @@ class Denario:
         self.get_idea()
         self.get_method()
         self.get_results()
-        self.get_paper()
+        try:
+            self.get_paper()
+        except AuthorshipConfirmationError as exc:
+            print(exc)
+            print(
+                "Denario stopped before paper generation. Review the artifacts, call "
+                "confirm_authorship(summary=...), then rerun get_paper()."
+            )
