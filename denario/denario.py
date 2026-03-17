@@ -755,8 +755,14 @@ class Denario:
         self.research.results = experiment.results
         self.research.plot_paths = experiment.plot_paths
 
-        # move plots to the plots folder in input_files/plots 
-        ## Clearing the folder
+        # Move plots to the plots folder in input_files/plots.
+        # Some cmbagent runs return plot paths but leave the destination missing;
+        # guard against that so plots always land in a directory, never a file path.
+        if os.path.isfile(self.plots_folder):
+            os.remove(self.plots_folder)
+        os.makedirs(self.plots_folder, exist_ok=True)
+
+        # Clear any previous plot outputs.
         if os.path.exists(self.plots_folder):
             for file in os.listdir(self.plots_folder):
                 file_path = os.path.join(self.plots_folder, file)
@@ -765,7 +771,9 @@ class Denario:
                 elif os.path.isdir(file_path):
                     shutil.rmtree(file_path)
         for plot_path in self.research.plot_paths:
-            shutil.move(plot_path, self.plots_folder)
+            if os.path.exists(plot_path):
+                destination = os.path.join(self.plots_folder, os.path.basename(plot_path))
+                shutil.move(plot_path, destination)
 
         # Write results to file
         results_path = os.path.join(self.project_dir, INPUT_FILES, RESULTS_FILE)

@@ -1,3 +1,7 @@
+from ._compat import patch_mistralai_for_cmbagent
+
+patch_mistralai_for_cmbagent()
+
 from .denario import Denario, Research, Journal, LLM, models, KeyManager
 from .config import REPO_DIR
 
