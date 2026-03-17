@@ -10,8 +10,12 @@ class Research(BaseModel):
         description="The user's framing, stance, and perspective for the paper-writing stages.",
     )
     """The user's framing, stance, and perspective for the paper-writing stages."""
+    idea_candidates: List[str] = Field(default_factory=list, description="Candidate idea branches for comparison")
+    """Candidate idea branches for comparison."""
     idea: str = Field(default="", description="The idea of the project")
     """The idea of the project."""
+    method_candidates: List[str] = Field(default_factory=list, description="Candidate method branches for comparison")
+    """Candidate method branches for comparison."""
     methodology: str = Field(default="", description="The methodology of the project")
     """The methodology of the project."""
     results: str = Field(default="", description="The results of the project")

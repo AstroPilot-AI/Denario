@@ -3,12 +3,13 @@ import asyncio
 import time
 import os
 import shutil
+import re
 from datetime import datetime, UTC
 from pathlib import Path
 from PIL import Image 
 import cmbagent
 
-from .config import DEFAUL_PROJECT_NAME, INPUT_FILES, PLOTS_FOLDER, DESCRIPTION_FILE, RESEARCHER_STATEMENT_FILE, IDEA_FILE, METHOD_FILE, RESULTS_FILE, LITERATURE_FILE, AUTHORSHIP_CONFIRMATION_FILE
+from .config import DEFAUL_PROJECT_NAME, INPUT_FILES, PLOTS_FOLDER, DESCRIPTION_FILE, RESEARCHER_STATEMENT_FILE, IDEA_FILE, IDEA_CANDIDATES_FILE, IDEA_COMPARISON_FILE, METHOD_FILE, METHOD_CANDIDATES_FILE, METHOD_COMPARISON_FILE, RESULTS_FILE, LITERATURE_FILE, AUTHORSHIP_CONFIRMATION_FILE, BRANCH_WORKSPACES_DIR
 from .research import Research
 from .key_manager import KeyManager
 from .llm import LLM, models
@@ -191,6 +192,121 @@ class Denario:
             "confirm_authorship(summary=...) before get_paper()."
         )
 
+    def _candidate_file_for_kind(self, kind: str) -> str:
+        if kind == "idea":
+            return IDEA_CANDIDATES_FILE
+        if kind == "method":
+            return METHOD_CANDIDATES_FILE
+        raise ValueError("Candidate kind must be either 'idea' or 'method'.")
+
+    def _comparison_file_for_kind(self, kind: str) -> str:
+        if kind == "idea":
+            return IDEA_COMPARISON_FILE
+        if kind == "method":
+            return METHOD_COMPARISON_FILE
+        raise ValueError("Comparison kind must be either 'idea' or 'method'.")
+
+    def _candidate_attr_for_kind(self, kind: str) -> str:
+        if kind == "idea":
+            return "idea_candidates"
+        if kind == "method":
+            return "method_candidates"
+        raise ValueError("Candidate kind must be either 'idea' or 'method'.")
+
+    def _selected_setter_for_kind(self, kind: str):
+        if kind == "idea":
+            return self.set_idea
+        if kind == "method":
+            return self.set_method
+        raise ValueError("Candidate kind must be either 'idea' or 'method'.")
+
+    def _ensure_data_description_loaded(self) -> str:
+        if not self.research.data_description:
+            self.set_data_description()
+        return self.research.data_description
+
+    def _ensure_idea_loaded(self) -> str:
+        if not self.research.idea:
+            self.set_idea()
+        return self.research.idea
+
+    def _serialize_candidates(self, kind: str, candidates: list[str]) -> str:
+        kind_title = "Idea" if kind == "idea" else "Method"
+        sections = [f"# {kind_title} Candidates", ""]
+        for index, candidate in enumerate(candidates, start=1):
+            sections.extend(
+                [
+                    f"## Candidate {index}",
+                    "",
+                    candidate.strip(),
+                    "",
+                ]
+            )
+        return "\n".join(sections).strip() + "\n"
+
+    def _parse_candidates(self, text: str) -> list[str]:
+        matches = re.findall(
+            r"(?ms)^## Candidate \d+\s*\n(.*?)(?=^## Candidate \d+\s*\n|\Z)",
+            text.strip(),
+        )
+        candidates = [match.strip() for match in matches if match.strip()]
+        if candidates:
+            return candidates
+        text = text.strip()
+        return [text] if text else []
+
+    def _set_candidates(self, kind: str, candidates: list[str] | str | None) -> list[str]:
+        path = os.path.join(
+            self.project_dir, INPUT_FILES, self._candidate_file_for_kind(kind)
+        )
+
+        if candidates is None:
+            with open(path, 'r') as f:
+                text = f.read()
+            parsed = self._parse_candidates(text)
+        elif isinstance(candidates, str):
+            parsed = self._parse_candidates(input_check(candidates))
+        else:
+            parsed = []
+            for candidate in candidates:
+                cleaned = input_check(candidate).strip()
+                if cleaned:
+                    parsed.append(cleaned)
+
+        if not parsed:
+            raise ValueError(f"No {kind} candidates were provided.")
+
+        with open(path, 'w') as f:
+            f.write(self._serialize_candidates(kind, parsed))
+
+        setattr(self.research, self._candidate_attr_for_kind(kind), parsed)
+        return parsed
+
+    def _load_candidates(self, kind: str) -> list[str]:
+        attr = self._candidate_attr_for_kind(kind)
+        cached = getattr(self.research, attr)
+        if cached:
+            return cached
+
+        path = os.path.join(
+            self.project_dir, INPUT_FILES, self._candidate_file_for_kind(kind)
+        )
+        with open(path, 'r') as f:
+            parsed = self._parse_candidates(f.read())
+        setattr(self.research, attr, parsed)
+        return parsed
+
+    def _branch_workspace_root(self, kind: str) -> Path:
+        folder = "ideas" if kind == "idea" else "methods"
+        return Path(self.project_dir) / BRANCH_WORKSPACES_DIR / folder
+
+    def _prepare_branch_runner(self, branch_dir: Path):
+        runner = self.__class__(project_dir=str(branch_dir), clear_project_dir=True)
+        runner.set_data_description(self._ensure_data_description_loaded())
+        if self.research.researcher_statement:
+            runner.set_researcher_statement(self.research.researcher_statement)
+        return runner
+
     def set_data_description(self, data_description: str | None = None) -> None:
         """
         Set the description of the data and tools to be used by the agents.
@@ -209,6 +325,146 @@ class Denario:
         self.research.researcher_statement = self.setter(
             researcher_statement, RESEARCHER_STATEMENT_FILE
         )
+
+    def set_idea_candidates(self, idea_candidates: list[str] | str | None = None) -> None:
+        """Persist multiple idea candidates for later comparison and selection."""
+
+        self.research.idea_candidates = self._set_candidates("idea", idea_candidates)
+
+    def set_method_candidates(self, method_candidates: list[str] | str | None = None) -> None:
+        """Persist multiple methodology candidates for later comparison and selection."""
+
+        self.research.method_candidates = self._set_candidates("method", method_candidates)
+
+    def generate_idea_branches(self, count: int = 3, **kwargs) -> list[str]:
+        """Generate multiple idea branches without overwriting the selected idea."""
+
+        if count < 2:
+            raise ValueError("Idea branching requires at least 2 candidates.")
+
+        branch_root = self._branch_workspace_root("idea")
+        if branch_root.exists():
+            shutil.rmtree(branch_root)
+        branch_root.mkdir(parents=True, exist_ok=True)
+
+        candidates: list[str] = []
+        for index in range(1, count + 1):
+            branch_dir = branch_root / f"idea_branch_{index:02d}"
+            runner = self._prepare_branch_runner(branch_dir)
+            runner.get_idea(**kwargs)
+            if not runner.research.idea:
+                runner.set_idea()
+            candidates.append(runner.research.idea)
+
+        self.set_idea_candidates(candidates)
+        self.build_idea_comparison()
+        return candidates
+
+    def generate_method_branches(self, count: int = 3, **kwargs) -> list[str]:
+        """Generate multiple methodology branches using the currently selected idea."""
+
+        if count < 2:
+            raise ValueError("Method branching requires at least 2 candidates.")
+
+        selected_idea = self._ensure_idea_loaded()
+
+        branch_root = self._branch_workspace_root("method")
+        if branch_root.exists():
+            shutil.rmtree(branch_root)
+        branch_root.mkdir(parents=True, exist_ok=True)
+
+        candidates: list[str] = []
+        for index in range(1, count + 1):
+            branch_dir = branch_root / f"method_branch_{index:02d}"
+            runner = self._prepare_branch_runner(branch_dir)
+            runner.set_idea(selected_idea)
+            runner.get_method(**kwargs)
+            if not runner.research.methodology:
+                runner.set_method()
+            candidates.append(runner.research.methodology)
+
+        self.set_method_candidates(candidates)
+        self.build_method_comparison()
+        return candidates
+
+    def build_idea_comparison(self, criteria: list[str] | None = None) -> str:
+        """Write a human-first comparison template for idea branches."""
+
+        return self._build_comparison("idea", criteria=criteria)
+
+    def build_method_comparison(self, criteria: list[str] | None = None) -> str:
+        """Write a human-first comparison template for method branches."""
+
+        return self._build_comparison("method", criteria=criteria)
+
+    def _build_comparison(self, kind: str, criteria: list[str] | None = None) -> str:
+        candidates = self._load_candidates(kind)
+        kind_title = "Idea" if kind == "idea" else "Method"
+        criteria = criteria or [
+            "Novelty or differentiation",
+            "Feasibility with the available data and tools",
+            "Clarity and scientific defensibility",
+            "Fit with the intended paper contribution",
+        ]
+
+        lines = [
+            f"# {kind_title} Comparison",
+            "",
+            f"Use this file to compare candidate {kind.lower()} branches before selecting one.",
+            "",
+            "## Criteria",
+            "",
+        ]
+        lines.extend([f"- {criterion}" for criterion in criteria])
+        lines.extend(["", "## Decision", "", "- Selected candidate: ", "- Why: ", ""])
+
+        for index, candidate in enumerate(candidates, start=1):
+            lines.extend(
+                [
+                    f"## Candidate {index}",
+                    "",
+                    "### Strengths",
+                    "",
+                    "### Risks",
+                    "",
+                    "### Notes",
+                    "",
+                    "### Candidate Text",
+                    "",
+                    candidate.strip(),
+                    "",
+                ]
+            )
+
+        comparison = "\n".join(lines).strip() + "\n"
+        path = os.path.join(
+            self.project_dir, INPUT_FILES, self._comparison_file_for_kind(kind)
+        )
+        with open(path, 'w') as f:
+            f.write(comparison)
+        return comparison
+
+    def select_idea_candidate(self, index: int) -> str:
+        """Select one idea candidate as the active idea artifact."""
+
+        return self._select_candidate("idea", index)
+
+    def select_method_candidate(self, index: int) -> str:
+        """Select one methodology candidate as the active methods artifact."""
+
+        return self._select_candidate("method", index)
+
+    def _select_candidate(self, kind: str, index: int) -> str:
+        candidates = self._load_candidates(kind)
+        if index < 1 or index > len(candidates):
+            raise IndexError(
+                f"{kind.title()} candidate index must be between 1 and {len(candidates)}."
+            )
+
+        candidate = candidates[index - 1]
+        setter = self._selected_setter_for_kind(kind)
+        setter(candidate)
+        return candidate
 
     def set_idea(self, idea: str | None = None) -> None:
         """Manually set an idea, either directly from a string or providing the path of a markdown file with the idea."""
@@ -253,7 +509,9 @@ class Denario:
         for setter in (
             self.set_data_description,
             self.set_researcher_statement,
+            self.set_idea_candidates,
             self.set_idea,
+            self.set_method_candidates,
             self.set_method,
             self.set_results,
             self.set_plots,
@@ -290,6 +548,16 @@ class Denario:
         """Show the provided researcher statement."""
 
         self.printer(self.research.researcher_statement)
+
+    def show_idea_candidates(self) -> None:
+        """Show the stored idea candidates."""
+
+        self.printer(self._serialize_candidates("idea", self._load_candidates("idea")))
+
+    def show_method_candidates(self) -> None:
+        """Show the stored method candidates."""
+
+        self.printer(self._serialize_candidates("method", self._load_candidates("method")))
 
     def show_method(self) -> None:
         """Show the provided or generated methods by `set_method` or `get_method`."""

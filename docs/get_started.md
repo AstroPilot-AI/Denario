@@ -29,6 +29,20 @@ den.set_researcher_statement(
 )
 ```
 
+If you want to compare multiple directions before converging, generate candidate branches and build a comparison template:
+
+```python
+den.generate_idea_branches(count=3)
+den.build_idea_comparison(
+    criteria=[
+        "Novelty",
+        "Feasibility with this dataset",
+        "Fit to the intended paper contribution",
+    ]
+)
+den.select_idea_candidate(2)
+```
+
 This will trigger a planning and control workflow to design the ide. For a faster method you can use:
 
 ```python
@@ -77,3 +91,5 @@ den.set_method(path_to_the_method_file.md)
 ```
 
 You can also provide a `researcher_statement.md` artifact through `set_researcher_statement(...)` if you want the paper-writing stages to preserve a particular stance, emphasis, or constraint.
+
+Similarly, `generate_idea_branches(...)`, `generate_method_branches(...)`, `build_idea_comparison(...)`, `build_method_comparison(...)`, `select_idea_candidate(...)`, and `select_method_candidate(...)` support a compare-before-converge workflow.
