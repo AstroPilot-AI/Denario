@@ -1,6 +1,6 @@
 [project]
 name = "denario"
-version = "1.0.1"
+version = "1.1.0b6"
 description = "Modular Multi-Agent System for Scientific Research Assistance"
 authors = [
   { name = "Pablo Villanueva-Domingo" },
@@ -41,7 +41,7 @@ Repository = "https://github.com/AstroPilot-AI/Denario"
 denario = "denario.cli:main"
 
 [project.optional-dependencies]
-app = ["denario_app>=1.0.0"]
+app = ["denario_app>=1.1.0b1"]
 docs = [
   "mkdocs",
   "mkdocstrings[python]",
