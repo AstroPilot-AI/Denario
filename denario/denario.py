@@ -30,7 +30,8 @@ class Denario:
     - `langgraph`, for faster idea and method generation, and for the paper writing.
 
     Args:
-        input_data: Input data to be used. Employ default data if `None`.
+        research: Optional Research object to use as initial state. If None, a default Research() is 
+            created (and may be populated from files in project_dir/input_files via set_all()).
         project_dir: Directory project. If `None`, create a `project` folder in the current directory.
         clear_project_dir: Clear all files in project directory when initializing if `True`.
     """
