@@ -21,6 +21,28 @@ Generate a research idea from that data specification.
 den.get_idea()
 ```
 
+Optionally, give Denario a short researcher statement so the paper-writing stages preserve your framing and priorities rather than defaulting only to generic scientific tone.
+
+```python
+den.set_researcher_statement(
+    "Emphasize robustness and measurement limits. Do not overclaim causality."
+)
+```
+
+If you want to compare multiple directions before converging, generate candidate branches and build a comparison template:
+
+```python
+den.generate_idea_branches(count=3)
+den.build_idea_comparison(
+    criteria=[
+        "Novelty",
+        "Feasibility with this dataset",
+        "Fit to the intended paper contribution",
+    ]
+)
+den.select_idea_candidate(2)
+```
+
 This will trigger a planning and control workflow to design the ide. For a faster method you can use:
 
 ```python
@@ -46,6 +68,14 @@ With the methodology setup, perform the required computations and get the plots 
 den.get_results()
 ```
 
+Before paper generation, explicitly confirm that a human reviewed the outputs and accepts authorship responsibility.
+
+```python
+den.confirm_authorship(
+    "I checked the claims against the results, reviewed the citations, and rewrote the sections I will stand behind."
+)
+```
+
 Finally, generate a latex article with the results. You can specify the journal style, in this example we choose the [APS (Physical Review Journals)](https://journals.aps.org/) style.
 
 ```python
@@ -59,3 +89,7 @@ You can also manually provide any info as a string or markdown file in an interm
 ```python
 den.set_method(path_to_the_method_file.md)
 ```
+
+You can also provide a `researcher_statement.md` artifact through `set_researcher_statement(...)` if you want the paper-writing stages to preserve a particular stance, emphasis, or constraint.
+
+Similarly, `generate_idea_branches(...)`, `generate_method_branches(...)`, `build_idea_comparison(...)`, `build_method_comparison(...)`, `select_idea_candidate(...)`, and `select_method_candidate(...)` support a compare-before-converge workflow.

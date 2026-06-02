@@ -3,11 +3,13 @@ import asyncio
 import time
 import os
 import shutil
+import re
+from datetime import datetime, UTC
 from pathlib import Path
 from PIL import Image 
 import cmbagent
 
-from .config import DEFAUL_PROJECT_NAME, INPUT_FILES, PLOTS_FOLDER, DESCRIPTION_FILE, IDEA_FILE, METHOD_FILE, RESULTS_FILE, LITERATURE_FILE
+from .config import DEFAUL_PROJECT_NAME, INPUT_FILES, PLOTS_FOLDER, DESCRIPTION_FILE, RESEARCHER_STATEMENT_FILE, IDEA_FILE, IDEA_CANDIDATES_FILE, IDEA_COMPARISON_FILE, METHOD_FILE, METHOD_CANDIDATES_FILE, METHOD_COMPARISON_FILE, RESULTS_FILE, LITERATURE_FILE, AUTHORSHIP_CONFIRMATION_FILE, BRANCH_WORKSPACES_DIR
 from .research import Research
 from .key_manager import KeyManager
 from .llm import LLM, models
@@ -18,6 +20,7 @@ from .experiment import Experiment
 from .paper_agents.agents_graph import build_graph
 from .utils import llm_parser, input_check, check_file_paths, in_notebook
 from .langgraph_agents.agents_graph import build_lg_graph
+from .exceptions import AuthorshipConfirmationError
 from cmbagent import preprocess_task
 
 class Denario:
@@ -58,6 +61,9 @@ class Denario:
         self.project_dir = project_dir
 
         self.plots_folder = os.path.join(self.project_dir, INPUT_FILES, PLOTS_FOLDER)
+        self.authorship_confirmation_path = os.path.join(
+            self.project_dir, INPUT_FILES, AUTHORSHIP_CONFIRMATION_FILE
+        )
         # Ensure the folder exists
         os.makedirs(self.plots_folder, exist_ok=True)
 
@@ -93,19 +99,214 @@ class Denario:
     def setter(self, field: str | None, file: str) -> str:
         """Base method for setting the content of idea, method or results."""
 
+        path = os.path.join(self.project_dir, INPUT_FILES, file)
+        previous_value = None
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                previous_value = f.read()
+
         if field is None:
             try:
-                with open(os.path.join(self.project_dir, INPUT_FILES, file), 'r') as f:
+                with open(path, 'r') as f:
                     field = f.read()
             except FileNotFoundError:
                 raise FileNotFoundError("Please provide an input string or path to a markdown file.")
 
         field = input_check(field)
                 
-        with open(os.path.join(self.project_dir, INPUT_FILES, file), 'w') as f:
+        with open(path, 'w') as f:
             f.write(field)
 
+        if previous_value is not None and previous_value != field:
+            self._invalidate_authorship_confirmation()
+
         return field
+
+    def _invalidate_authorship_confirmation(self) -> None:
+        self.research.authorship_confirmation = ""
+        if os.path.exists(self.authorship_confirmation_path):
+            os.remove(self.authorship_confirmation_path)
+
+    def _load_authorship_confirmation(self) -> str:
+        if self.research.authorship_confirmation:
+            return self.research.authorship_confirmation
+
+        try:
+            with open(self.authorship_confirmation_path, 'r') as f:
+                self.research.authorship_confirmation = f.read()
+        except FileNotFoundError:
+            self.research.authorship_confirmation = ""
+
+        return self.research.authorship_confirmation
+
+    def confirm_authorship(
+        self,
+        summary: str,
+        *,
+        reviewed_claims: bool = True,
+        reviewed_citations: bool = True,
+        accepts_responsibility: bool = True,
+    ) -> str:
+        """Record explicit human sign-off before paper generation.
+
+        Args:
+            summary: Brief description of what the human reviewed or rewrote.
+            reviewed_claims: Confirm that claims were checked against the artifacts.
+            reviewed_citations: Confirm that citations/references were checked.
+            accepts_responsibility: Confirm that a human accepts authorship responsibility.
+        """
+
+        summary = input_check(summary).strip()
+        if not summary:
+            raise ValueError("Please provide a non-empty authorship review summary.")
+        if not reviewed_claims or not reviewed_citations or not accepts_responsibility:
+            raise ValueError(
+                "Authorship confirmation requires claims review, citation review, and responsibility acceptance."
+            )
+
+        confirmed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+        confirmation = (
+            "# Authorship Confirmation\n\n"
+            f"Confirmed at: {confirmed_at}\n\n"
+            "- Reviewed claims: yes\n"
+            "- Reviewed citations: yes\n"
+            "- Accepts human authorship responsibility: yes\n\n"
+            "## Review Summary\n\n"
+            f"{summary}\n"
+        )
+
+        with open(self.authorship_confirmation_path, 'w') as f:
+            f.write(confirmation)
+
+        self.research.authorship_confirmation = confirmation
+        print(f"Authorship confirmation written to: {self.authorship_confirmation_path}")
+        return confirmation
+
+    def _require_authorship_confirmation(self) -> str:
+        confirmation = self._load_authorship_confirmation()
+        if confirmation.strip():
+            return confirmation
+
+        raise AuthorshipConfirmationError(
+            "Paper generation requires explicit human sign-off. "
+            "Review the generated artifacts, then call "
+            "confirm_authorship(summary=...) before get_paper()."
+        )
+
+    def _candidate_file_for_kind(self, kind: str) -> str:
+        if kind == "idea":
+            return IDEA_CANDIDATES_FILE
+        if kind == "method":
+            return METHOD_CANDIDATES_FILE
+        raise ValueError("Candidate kind must be either 'idea' or 'method'.")
+
+    def _comparison_file_for_kind(self, kind: str) -> str:
+        if kind == "idea":
+            return IDEA_COMPARISON_FILE
+        if kind == "method":
+            return METHOD_COMPARISON_FILE
+        raise ValueError("Comparison kind must be either 'idea' or 'method'.")
+
+    def _candidate_attr_for_kind(self, kind: str) -> str:
+        if kind == "idea":
+            return "idea_candidates"
+        if kind == "method":
+            return "method_candidates"
+        raise ValueError("Candidate kind must be either 'idea' or 'method'.")
+
+    def _selected_setter_for_kind(self, kind: str):
+        if kind == "idea":
+            return self.set_idea
+        if kind == "method":
+            return self.set_method
+        raise ValueError("Candidate kind must be either 'idea' or 'method'.")
+
+    def _ensure_data_description_loaded(self) -> str:
+        if not self.research.data_description:
+            self.set_data_description()
+        return self.research.data_description
+
+    def _ensure_idea_loaded(self) -> str:
+        if not self.research.idea:
+            self.set_idea()
+        return self.research.idea
+
+    def _serialize_candidates(self, kind: str, candidates: list[str]) -> str:
+        kind_title = "Idea" if kind == "idea" else "Method"
+        sections = [f"# {kind_title} Candidates", ""]
+        for index, candidate in enumerate(candidates, start=1):
+            sections.extend(
+                [
+                    f"## Candidate {index}",
+                    "",
+                    candidate.strip(),
+                    "",
+                ]
+            )
+        return "\n".join(sections).strip() + "\n"
+
+    def _parse_candidates(self, text: str) -> list[str]:
+        matches = re.findall(
+            r"(?ms)^## Candidate \d+\s*\n(.*?)(?=^## Candidate \d+\s*\n|\Z)",
+            text.strip(),
+        )
+        candidates = [match.strip() for match in matches if match.strip()]
+        if candidates:
+            return candidates
+        text = text.strip()
+        return [text] if text else []
+
+    def _set_candidates(self, kind: str, candidates: list[str] | str | None) -> list[str]:
+        path = os.path.join(
+            self.project_dir, INPUT_FILES, self._candidate_file_for_kind(kind)
+        )
+
+        if candidates is None:
+            with open(path, 'r') as f:
+                text = f.read()
+            parsed = self._parse_candidates(text)
+        elif isinstance(candidates, str):
+            parsed = self._parse_candidates(input_check(candidates))
+        else:
+            parsed = []
+            for candidate in candidates:
+                cleaned = input_check(candidate).strip()
+                if cleaned:
+                    parsed.append(cleaned)
+
+        if not parsed:
+            raise ValueError(f"No {kind} candidates were provided.")
+
+        with open(path, 'w') as f:
+            f.write(self._serialize_candidates(kind, parsed))
+
+        setattr(self.research, self._candidate_attr_for_kind(kind), parsed)
+        return parsed
+
+    def _load_candidates(self, kind: str) -> list[str]:
+        attr = self._candidate_attr_for_kind(kind)
+        cached = getattr(self.research, attr)
+        if cached:
+            return cached
+
+        path = os.path.join(
+            self.project_dir, INPUT_FILES, self._candidate_file_for_kind(kind)
+        )
+        with open(path, 'r') as f:
+            parsed = self._parse_candidates(f.read())
+        setattr(self.research, attr, parsed)
+        return parsed
+
+    def _branch_workspace_root(self, kind: str) -> Path:
+        folder = "ideas" if kind == "idea" else "methods"
+        return Path(self.project_dir) / BRANCH_WORKSPACES_DIR / folder
+
+    def _prepare_branch_runner(self, branch_dir: Path):
+        runner = self.__class__(project_dir=str(branch_dir), clear_project_dir=True)
+        runner.set_data_description(self._ensure_data_description_loaded())
+        if self.research.researcher_statement:
+            runner.set_researcher_statement(self.research.researcher_statement)
+        return runner
 
     def set_data_description(self, data_description: str | None = None) -> None:
         """
@@ -118,6 +319,153 @@ class Denario:
         self.research.data_description = self.setter(data_description, DESCRIPTION_FILE)
 
         check_file_paths(self.research.data_description)
+
+    def set_researcher_statement(self, researcher_statement: str | None = None) -> None:
+        """Set the user's framing, stance, or non-negotiable perspective for paper writing."""
+
+        self.research.researcher_statement = self.setter(
+            researcher_statement, RESEARCHER_STATEMENT_FILE
+        )
+
+    def set_idea_candidates(self, idea_candidates: list[str] | str | None = None) -> None:
+        """Persist multiple idea candidates for later comparison and selection."""
+
+        self.research.idea_candidates = self._set_candidates("idea", idea_candidates)
+
+    def set_method_candidates(self, method_candidates: list[str] | str | None = None) -> None:
+        """Persist multiple methodology candidates for later comparison and selection."""
+
+        self.research.method_candidates = self._set_candidates("method", method_candidates)
+
+    def generate_idea_branches(self, count: int = 3, **kwargs) -> list[str]:
+        """Generate multiple idea branches without overwriting the selected idea."""
+
+        if count < 2:
+            raise ValueError("Idea branching requires at least 2 candidates.")
+
+        branch_root = self._branch_workspace_root("idea")
+        if branch_root.exists():
+            shutil.rmtree(branch_root)
+        branch_root.mkdir(parents=True, exist_ok=True)
+
+        candidates: list[str] = []
+        for index in range(1, count + 1):
+            branch_dir = branch_root / f"idea_branch_{index:02d}"
+            runner = self._prepare_branch_runner(branch_dir)
+            runner.get_idea(**kwargs)
+            if not runner.research.idea:
+                runner.set_idea()
+            candidates.append(runner.research.idea)
+
+        self.set_idea_candidates(candidates)
+        self.build_idea_comparison()
+        return candidates
+
+    def generate_method_branches(self, count: int = 3, **kwargs) -> list[str]:
+        """Generate multiple methodology branches using the currently selected idea."""
+
+        if count < 2:
+            raise ValueError("Method branching requires at least 2 candidates.")
+
+        selected_idea = self._ensure_idea_loaded()
+
+        branch_root = self._branch_workspace_root("method")
+        if branch_root.exists():
+            shutil.rmtree(branch_root)
+        branch_root.mkdir(parents=True, exist_ok=True)
+
+        candidates: list[str] = []
+        for index in range(1, count + 1):
+            branch_dir = branch_root / f"method_branch_{index:02d}"
+            runner = self._prepare_branch_runner(branch_dir)
+            runner.set_idea(selected_idea)
+            runner.get_method(**kwargs)
+            if not runner.research.methodology:
+                runner.set_method()
+            candidates.append(runner.research.methodology)
+
+        self.set_method_candidates(candidates)
+        self.build_method_comparison()
+        return candidates
+
+    def build_idea_comparison(self, criteria: list[str] | None = None) -> str:
+        """Write a human-first comparison template for idea branches."""
+
+        return self._build_comparison("idea", criteria=criteria)
+
+    def build_method_comparison(self, criteria: list[str] | None = None) -> str:
+        """Write a human-first comparison template for method branches."""
+
+        return self._build_comparison("method", criteria=criteria)
+
+    def _build_comparison(self, kind: str, criteria: list[str] | None = None) -> str:
+        candidates = self._load_candidates(kind)
+        kind_title = "Idea" if kind == "idea" else "Method"
+        criteria = criteria or [
+            "Novelty or differentiation",
+            "Feasibility with the available data and tools",
+            "Clarity and scientific defensibility",
+            "Fit with the intended paper contribution",
+        ]
+
+        lines = [
+            f"# {kind_title} Comparison",
+            "",
+            f"Use this file to compare candidate {kind.lower()} branches before selecting one.",
+            "",
+            "## Criteria",
+            "",
+        ]
+        lines.extend([f"- {criterion}" for criterion in criteria])
+        lines.extend(["", "## Decision", "", "- Selected candidate: ", "- Why: ", ""])
+
+        for index, candidate in enumerate(candidates, start=1):
+            lines.extend(
+                [
+                    f"## Candidate {index}",
+                    "",
+                    "### Strengths",
+                    "",
+                    "### Risks",
+                    "",
+                    "### Notes",
+                    "",
+                    "### Candidate Text",
+                    "",
+                    candidate.strip(),
+                    "",
+                ]
+            )
+
+        comparison = "\n".join(lines).strip() + "\n"
+        path = os.path.join(
+            self.project_dir, INPUT_FILES, self._comparison_file_for_kind(kind)
+        )
+        with open(path, 'w') as f:
+            f.write(comparison)
+        return comparison
+
+    def select_idea_candidate(self, index: int) -> str:
+        """Select one idea candidate as the active idea artifact."""
+
+        return self._select_candidate("idea", index)
+
+    def select_method_candidate(self, index: int) -> str:
+        """Select one methodology candidate as the active methods artifact."""
+
+        return self._select_candidate("method", index)
+
+    def _select_candidate(self, kind: str, index: int) -> str:
+        candidates = self._load_candidates(kind)
+        if index < 1 or index > len(candidates):
+            raise IndexError(
+                f"{kind.title()} candidate index must be between 1 and {len(candidates)}."
+            )
+
+        candidate = candidates[index - 1]
+        setter = self._selected_setter_for_kind(kind)
+        setter(candidate)
+        return candidate
 
     def set_idea(self, idea: str | None = None) -> None:
         """Manually set an idea, either directly from a string or providing the path of a markdown file with the idea."""
@@ -137,6 +485,8 @@ class Denario:
     def set_plots(self, plots: list[str] | list[Image.Image] | None = None) -> None:
         """Manually set the plots from their path."""
 
+        provided_plots = plots is not None
+
         if plots is None:
             plots = [str(p) for p in (Path(self.project_dir) / "input_files" / "Plots").glob("*.png")]
 
@@ -151,12 +501,18 @@ class Denario:
             
             img.save( os.path.join(self.project_dir, INPUT_FILES, PLOTS_FOLDER, plot_name) )
 
+        if provided_plots:
+            self._invalidate_authorship_confirmation()
+
     def set_all(self) -> None:
         """Set all Research fields if present in the working directory"""
 
         for setter in (
             self.set_data_description,
+            self.set_researcher_statement,
+            self.set_idea_candidates,
             self.set_idea,
+            self.set_method_candidates,
             self.set_method,
             self.set_results,
             self.set_plots,
@@ -186,8 +542,23 @@ class Denario:
 
     def show_idea(self) -> None:
         """Show the provided or generated idea by the `set_idea` or `get_idea` methods."""
-
+        
         self.printer(self.research.idea)
+
+    def show_researcher_statement(self) -> None:
+        """Show the provided researcher statement."""
+
+        self.printer(self.research.researcher_statement)
+
+    def show_idea_candidates(self) -> None:
+        """Show the stored idea candidates."""
+
+        self.printer(self._serialize_candidates("idea", self._load_candidates("idea")))
+
+    def show_method_candidates(self) -> None:
+        """Show the stored method candidates."""
+
+        self.printer(self._serialize_candidates("method", self._load_candidates("method")))
 
     def show_method(self) -> None:
         """Show the provided or generated methods by `set_method` or `get_method`."""
@@ -261,6 +632,7 @@ class Denario:
                 print(f"Enhanced text from file length: {len(enhanced_text)}")
         
         # Update the research object with enhanced text
+        previous_data_description = self.research.data_description
         self.research.data_description = enhanced_text
 
         # Create the input_files directory if it doesn't exist
@@ -274,6 +646,9 @@ class Denario:
 
         # set the enhanced text to the research object
         self.research.data_description = enhanced_text
+
+        if previous_data_description != enhanced_text:
+            self._invalidate_authorship_confirmation()
             
         print(f"Enhanced text written to: {os.path.join(input_files_dir, DESCRIPTION_FILE)}")
 
@@ -362,6 +737,7 @@ class Denario:
             f.write(idea)
 
         self.idea = idea
+        self._invalidate_authorship_confirmation()
 
     def get_idea_fast(self,
                       llm: LLM | str = models["gemini-2.0-flash"],
@@ -411,6 +787,7 @@ class Denario:
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
         print(f"Idea generated in {minutes} min {seconds} sec.")
+        self._invalidate_authorship_confirmation()
 
     def check_idea(self,
                    mode : str = 'semantic_scholar',
@@ -635,6 +1012,7 @@ class Denario:
         method_path = os.path.join(self.project_dir, INPUT_FILES, METHOD_FILE)
         with open(method_path, 'w') as f:
             f.write(methododology)
+        self._invalidate_authorship_confirmation()
 
     def get_method_fast(self,
                         llm: LLM | str = models["gemini-2.0-flash"],
@@ -685,6 +1063,7 @@ class Denario:
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
         print(f"Methods generated in {minutes} min {seconds} sec.")  
+        self._invalidate_authorship_confirmation()
 
     def get_results(self,
                     involved_agents: List[str] = ['engineer', 'researcher'],
@@ -756,8 +1135,14 @@ class Denario:
         self.research.results = experiment.results
         self.research.plot_paths = experiment.plot_paths
 
-        # move plots to the plots folder in input_files/plots 
-        ## Clearing the folder
+        # Move plots to the plots folder in input_files/plots.
+        # Some cmbagent runs return plot paths but leave the destination missing;
+        # guard against that so plots always land in a directory, never a file path.
+        if os.path.isfile(self.plots_folder):
+            os.remove(self.plots_folder)
+        os.makedirs(self.plots_folder, exist_ok=True)
+
+        # Clear any previous plot outputs.
         if os.path.exists(self.plots_folder):
             for file in os.listdir(self.plots_folder):
                 file_path = os.path.join(self.plots_folder, file)
@@ -766,12 +1151,15 @@ class Denario:
                 elif os.path.isdir(file_path):
                     shutil.rmtree(file_path)
         for plot_path in self.research.plot_paths:
-            shutil.move(plot_path, self.plots_folder)
+            if os.path.exists(plot_path):
+                destination = os.path.join(self.plots_folder, os.path.basename(plot_path))
+                shutil.move(plot_path, destination)
 
         # Write results to file
         results_path = os.path.join(self.project_dir, INPUT_FILES, RESULTS_FILE)
         with open(results_path, 'w') as f:
             f.write(self.research.results)
+        self._invalidate_authorship_confirmation()
     
     def get_keywords(self, input_text: str, n_keywords: int = 5, kw_type: str = 'unesco') -> None:
         """
@@ -796,6 +1184,7 @@ class Denario:
                   writer: str = 'scientist',
                   cmbagent_keywords: bool = False,
                   add_citations=True,
+                  require_authorship_confirmation: bool = True,
                   ) -> None:
         """
         Generate a full paper based on the files in input_files:
@@ -821,7 +1210,11 @@ class Denario:
             writer: set the style and tone to write. E.g. astrophysicist, biologist, chemist
             cmbagent_keywords: whether to use CMBAgent to select the keywords
             add_citations: whether to add citations to the paper or not
+            require_authorship_confirmation: require explicit human review before paper writing
         """
+
+        if require_authorship_confirmation:
+            self._require_authorship_confirmation()
         
         # Start timer
         start_time = time.time()
@@ -922,4 +1315,11 @@ class Denario:
         self.get_idea()
         self.get_method()
         self.get_results()
-        self.get_paper()
+        try:
+            self.get_paper()
+        except AuthorshipConfirmationError as exc:
+            print(exc)
+            print(
+                "Denario stopped before paper generation. Review the artifacts, call "
+                "confirm_authorship(summary=...), then rerun get_paper()."
+            )

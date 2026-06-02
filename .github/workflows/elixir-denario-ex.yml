@@ -1,0 +1,46 @@
+name: Elixir DenarioEx CI
+
+on:
+  push:
+    paths:
+      - ".github/workflows/elixir-denario-ex.yml"
+      - "elixir/denario_ex/**"
+  pull_request:
+    paths:
+      - ".github/workflows/elixir-denario-ex.yml"
+      - "elixir/denario_ex/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: elixir/denario_ex
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.4"
+          otp-version: "28.0"
+
+      - name: Restore Mix cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.mix
+            ~/.hex
+            elixir/denario_ex/deps
+            elixir/denario_ex/_build
+          key: ${{ runner.os }}-elixir-denario-ex-${{ hashFiles('elixir/denario_ex/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-elixir-denario-ex-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Run tests
+        run: mix test
