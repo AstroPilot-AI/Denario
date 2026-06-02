@@ -1,6 +1,7 @@
 import re
 import requests
 from typing import List, Tuple
+from requests.exceptions import JSONDecodeError as RequestsJSONDecodeError
 
 from ..key_manager import KeyManager
 
@@ -15,8 +16,34 @@ def _execute_query(payload, keys: KeyManager):
         PerplexityChatCompletionResponse: Parsed response from the Perplexity API.
     """
     api_key = keys.PERPLEXITY
+    if not api_key:
+        raise RuntimeError(
+            "PERPLEXITY_API_KEY is not set. Set it to enable add_citations=True, "
+            "or run get_paper(add_citations=False)."
+        )
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=payload).json()
+    raw_response = requests.post(
+        "https://api.perplexity.ai/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=60,
+    )
+
+    if raw_response.status_code != 200:
+        body_preview = (raw_response.text or "").strip()[:500]
+        raise RuntimeError(
+            f"Perplexity API error {raw_response.status_code}. "
+            f"Body (first 500 chars): {body_preview}"
+        )
+
+    try:
+        response = raw_response.json()
+    except (ValueError, RequestsJSONDecodeError) as e:
+        body_preview = (raw_response.text or "").strip()[:500]
+        raise RuntimeError(
+            "Perplexity API returned non-JSON response. "
+            f"Body (first 500 chars): {body_preview}"
+        ) from e
 
     return response
 

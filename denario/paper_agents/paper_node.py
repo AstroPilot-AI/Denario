@@ -477,7 +477,11 @@ async def add_citations_async(state, text, section_name):
         
         loop = asyncio.get_event_loop()
         func = partial(process_tex_file_with_references, text, state["keys"])
-        new_text, references = await loop.run_in_executor(None, func)
+        try:
+            new_text, references = await loop.run_in_executor(None, func)
+        except Exception as e:
+            print(f"    {section_name} citations failed: {e}")
+            return section_name, text, ""
         new_text = clean_section(new_text, section_name)
 
         # save temporary file
@@ -494,16 +498,26 @@ async def citations_node(state: GraphState, config: RunnableConfig):
 
     print("Adding citations...")
 
+    if not state["keys"].PERPLEXITY:
+        print("⚠️  PERPLEXITY_API_KEY not set; skipping citation insertion.")
+        return {'paper': state['paper'],
+                'tokens': state['tokens']}
+
     #sections = ['Introduction', 'Methods', 'Results', 'Conclusions']
     sections = ['Introduction', 'Methods']
     tasks = [add_citations_async(state, state['paper'][section], section) for section in sections]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Deduplicate full BibTeX entries
     bib_entries_set = set()
     bib_entries_list = []
 
-    for section_name, updated_text, references in results:
+    for result in results:
+        if isinstance(result, Exception):
+            print(f"⚠️  Citation task failed: {result}")
+            continue
+
+        section_name, updated_text, references = result
 
         state['paper'][section_name] = updated_text
 
@@ -553,4 +567,3 @@ async def citations_node(state: GraphState, config: RunnableConfig):
     return {'paper': state['paper'],
             'tokens': state['tokens']}
 #######################################################################################
-
