@@ -11,6 +11,7 @@ from langchain_anthropic import ChatAnthropic
 from .parameters import GraphState
 from .latex_presets import journal_dict
 from ..config import INPUT_FILES, IDEA_FILE, METHOD_FILE, RESULTS_FILE, PAPER_FOLDER, PLOTS_FOLDER, LaTeX_DIR
+from ..llm import models
 
 
 def preprocess_node(state: GraphState, config: RunnableConfig):
@@ -19,7 +20,19 @@ def preprocess_node(state: GraphState, config: RunnableConfig):
     """
 
     # set the LLM
-    if 'gemini' in state['llm']['model']:
+    if state["keys"].OPENROUTER:
+        model_name = state['llm']['model']
+        openrouter_model = model_name
+        if model_name in models:
+             if models[model_name].openrouter_name:
+                 openrouter_model = models[model_name].openrouter_name
+        
+        state['llm']['llm'] = ChatOpenAI(model=openrouter_model,
+                                         temperature=state['llm']['temperature'],
+                                         openai_api_key=state["keys"].OPENROUTER,
+                                         base_url="https://openrouter.ai/api/v1")
+
+    elif 'gemini' in state['llm']['model']:
         state['llm']['llm'] = ChatGoogleGenerativeAI(model=state['llm']['model'],
                                                 temperature=state['llm']['temperature'],
                                                 google_api_key=state["keys"].GEMINI)

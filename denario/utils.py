@@ -40,7 +40,7 @@ def extract_file_paths(markdown_text):
     """
     
     # Pattern to match file paths in markdown bullet points
-    pattern = r'-\s*([^\n]+\.(?:csv|txt|md|py|json|yaml|yml|xml|html|css|js|ts|tsx|jsx|java|cpp|c|h|hpp|go|rs|php|rb|pl|sh|bat|sql|log))'
+    pattern = r'-\s*([^\n]+\.(?:h5|xlsx|xls|csv|txt|md|py|json|yaml|yml|xml|html|css|js|ts|tsx|jsx|java|cpp|c|h|hpp|go|rs|php|rb|pl|sh|bat|sql|log))'
     
     # Find all matches
     matches = re.findall(pattern, markdown_text, re.IGNORECASE)
@@ -87,11 +87,11 @@ def get_task_result(chat_history, name: str):
     """Get task result from chat history"""
     
     for obj in chat_history[::-1]:
-        if obj['name'] == name:
-            result = obj['content']
-            break
-    task_result = result
-    return task_result
+        # Using .get() to avoid KeyError if 'name' is missing
+        if obj.get('name') == name:
+            return obj.get('content')
+            
+    return None
 
 def in_notebook():
     """Check whether the code is run from a Jupyter Notebook or not, to use different display options"""

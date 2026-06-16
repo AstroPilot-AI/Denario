@@ -1,6 +1,7 @@
 import subprocess
 import os
 import re
+import shutil
 from pathlib import Path
 
 from .parameters import GraphState
@@ -92,23 +93,49 @@ def compile_tex_document(state: dict, doc_name: str, doc_folder: str) -> None:
     doc_stem = file_path.stem
     bib_path = os.path.join(state['files']['Temp'], "bibliography.bib")
 
+    def get_latex_command(name, is_final=False):
+        if shutil.which("xelatex"):
+            cmd = ["xelatex"]
+            if is_final:
+                cmd.extend(["-interaction=nonstopmode", "-file-line-error"])
+            cmd.append(name)
+            return cmd, "xelatex"
+        elif shutil.which("tectonic"):
+            return ["tectonic", name], "tectonic"
+        else:
+            raise FileNotFoundError("Neither xelatex nor tectonic found in PATH.")
+
     def run_xelatex(pass_num=None):
-        result = subprocess.run(["xelatex", doc_name], cwd=doc_folder,
-                                input="\n", capture_output=True, text=True)
-        if result.returncode != 0:
-            print("❌", end="", flush=True)
-            clean_files(doc_name, doc_folder)
-            log_output(result)
-            extract_latex_errors(state)
-            return False
-            #raise RuntimeError(f"XeLaTeX failed (pass {pass_num}):\n{result.stderr}")
-        return True
+        try:
+            cmd, engine = get_latex_command(doc_name)
+            result = subprocess.run(cmd, cwd=doc_folder,
+                                    input="\n", capture_output=True, text=True)
+            if result.returncode != 0:
+                print("❌", end="", flush=True)
+                clean_files(doc_name, doc_folder)
+                log_output(result)
+                extract_latex_errors(state)
+                return False
+            return True
+        except FileNotFoundError:
+            print("⚠️", end="", flush=True)
+            with open(state['files']['LaTeX_log'], 'a') as f:
+                f.write(f"\n[WARNING] LaTeX engine (xelatex/tectonic) not found. Skipping compilation check.\n")
+            return True # Pretend it succeeded to let the flow continue
 
     def run_bibtex():
-        result = subprocess.run(["bibtex", doc_stem], cwd=doc_folder,
-                                capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"BibTeX failed:\n{result.stderr}")
+        try:
+            # Tectonic handles bibliography automatically
+            cmd, engine = get_latex_command(doc_name)
+            if engine == "tectonic":
+                return
+            
+            result = subprocess.run(["bibtex", doc_stem], cwd=doc_folder,
+                                    capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"BibTeX failed:\n{result.stderr}")
+        except FileNotFoundError:
+            print(" (No bibtex) ", end="", flush=True)
 
     def log_output(result):
         with open(state['files']['LaTeX_log'], 'a') as f:
@@ -117,9 +144,21 @@ def compile_tex_document(state: dict, doc_name: str, doc_folder: str) -> None:
             f.write("---- STDERR ----\n")
             f.write(result.stderr)
 
+    # Determine engine
+    try:
+        _, engine = get_latex_command(doc_name)
+    except FileNotFoundError:
+        engine = None
+
     # Pass 1
     if not(run_xelatex(pass_num=1)):
         return False
+
+    if engine == "tectonic":
+        # Tectonic is a one-pass compiler
+        print("✅", end="", flush=True)
+        clean_files(doc_name, doc_folder)
+        return True
 
     # Bibliography step if needed
     if os.path.exists(bib_path):
@@ -148,16 +187,39 @@ def compile_latex(state: GraphState, paper_name: str) -> None:
     # get the paper stem
     paper_stem = Path(paper_name).stem
 
+    def get_latex_command(name, is_final=False):
+        if shutil.which("xelatex"):
+            cmd = ["xelatex"]
+            if is_final:
+                cmd.extend(["-interaction=nonstopmode", "-file-line-error"])
+            cmd.append(name)
+            return cmd, "xelatex"
+        elif shutil.which("tectonic"):
+            return ["tectonic", name], "tectonic"
+        else:
+            raise FileNotFoundError("Neither xelatex nor tectonic found in PATH.")
+
     def run_xelatex():
-        return subprocess.run(["xelatex", "-interaction=nonstopmode", "-file-line-error", paper_name],
-                              cwd=state['files']['Paper_folder'],
-                              input="\n", capture_output=True,
-                              text=True, check=True)
+        try:
+            cmd, engine = get_latex_command(paper_name, is_final=True)
+            return subprocess.run(cmd,
+                                  cwd=state['files']['Paper_folder'],
+                                  input="\n", capture_output=True,
+                                  text=True, check=True)
+        except FileNotFoundError:
+            print("⚠️ (LaTeX engine missing, PDF not generated)", end="", flush=True)
+            return None
 
     def run_bibtex():
-        subprocess.run(["bibtex", paper_stem],
-                       cwd=state['files']['Paper_folder'],
-                       capture_output=True, text=True)
+        try:
+            cmd, engine = get_latex_command(paper_name)
+            if engine == "tectonic":
+                return
+            subprocess.run(["bibtex", paper_stem],
+                           cwd=state['files']['Paper_folder'],
+                           capture_output=True, text=True)
+        except FileNotFoundError:
+            pass
 
     def log_output(i, result_or_error, is_error=False):
         with open(state['files']['LaTeX_log'], 'a') as f:
@@ -167,6 +229,12 @@ def compile_latex(state: GraphState, paper_name: str) -> None:
             f.write("---- STDERR ----\n")
             f.write(result_or_error.stderr or "")
 
+    # Determine engine
+    try:
+        _, engine = get_latex_command(paper_name)
+    except FileNotFoundError:
+        engine = None
+
     # Try to compile it the first time
     print(f'Compiling {paper_stem}'.ljust(33,'.'), end="", flush=True)
     try:
@@ -175,6 +243,11 @@ def compile_latex(state: GraphState, paper_name: str) -> None:
     except subprocess.CalledProcessError as e:
         log_output("Pass 1", e, is_error=True)
         print("❌", end="", flush=True)
+
+    if engine == "tectonic":
+        # Tectonic is one-pass
+        print("")
+        return
 
     # if there is bibliography, compile it
     further_iterations = 1

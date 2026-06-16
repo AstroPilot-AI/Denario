@@ -45,7 +45,7 @@ class Denario:
         if project_dir is None:
             project_dir = os.path.join( os.getcwd(), DEFAUL_PROJECT_NAME )
         if not os.path.exists(project_dir):
-            os.mkdir(project_dir)
+            os.makedirs(project_dir, exist_ok=True)
 
         if research is None:
             research = Research()  # Initialize with default values
@@ -57,11 +57,11 @@ class Denario:
             os.makedirs(project_dir, exist_ok=True)
         self.project_dir = project_dir
 
+        self._setup_input_files()
+
         self.plots_folder = os.path.join(self.project_dir, INPUT_FILES, PLOTS_FOLDER)
         # Ensure the folder exists
         os.makedirs(self.plots_folder, exist_ok=True)
-
-        self._setup_input_files()
 
         # Get keys from environment if they exist
         self.keys = KeyManager()
@@ -906,6 +906,59 @@ class Denario:
         except FileNotFoundError as e:
             print('Denario failed to provide a review for the paper. Ensure that a paper in the `paper` folder ex')
             print(f'Error: {e}')
+
+    def add_literature(self, sections: list[str] = ["idea", "methods", "results"], n_paragraphs: int = None) -> None:
+        """
+        Add literature references to the specified sections.
+
+        Args:
+            sections: list of sections to add citations to (choose from "idea", "method", "results").
+            n_paragraphs: maximum number of paragraphs to process per section.
+        """
+        from .paper_agents.literature import process_tex_file_with_references
+        
+        # Start message
+        print(f"--- Adding Literature References to {', '.join(sections)} ---")
+        
+        # Mapping between section names and Research attributes
+        attr_map = {"idea": "idea", "methods": "methodology", "results": "results"}
+        
+        all_bibs = ""
+        for section in sections:
+            # Check if section exists in research object
+            attr_name = attr_map.get(section, section)
+            content = getattr(self.research, attr_name, None)
+            
+            if not content:
+                print(f"Skipping {section} as it is empty or not found.")
+                continue
+            
+            print(f"Processing {section}...")
+            new_content, bib = process_tex_file_with_references(content, self.keys, nparagraphs=n_paragraphs)
+            
+            # Update internal state
+            setattr(self.research, attr_name, new_content)
+            
+            # Accumulate bibliography
+            if bib:
+                all_bibs += bib.strip() + "\n\n"
+            
+            # Save the updated section back to input_files
+            file_map = {"idea": IDEA_FILE, "methods": METHOD_FILE, "results": RESULTS_FILE}
+            if section in file_map:
+                save_path = os.path.join(self.project_dir, INPUT_FILES, file_map[section])
+                with open(save_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                print(f"  - Updated {file_map[section]}")
+
+        # Save combined bibliography to input_files/bibliography.bib
+        if all_bibs:
+            bib_path = os.path.join(self.project_dir, INPUT_FILES, "bibliography.bib")
+            with open(bib_path, 'w', encoding='utf-8') as f:
+                f.write(all_bibs.strip())
+            print(f"  - Generated bibliography.bib")
+        
+        print("[SUCCESS] Literature references added.")
         
     def research_pilot(self, data_description: str | None = None) -> None:
         """Full run of Denario. It calls the following methods sequentially:
